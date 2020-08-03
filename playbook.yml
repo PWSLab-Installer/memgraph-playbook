@@ -1,0 +1,83 @@
+- hosts: localhost
+  connection: local
+
+  vars:
+    pip_install_packages:
+      - name: docker
+    #   - name: docker-py
+    memgraph_version: 1.1.0
+  tasks:
+
+    - name: Check the version of CentOS
+      command: hostnamectl
+      register: os_check
+      ignore_errors: yes
+      
+    - name: Install Role PIP
+      local_action: command ansible-galaxy install -f geerlingguy.pip 
+
+    - name: Install Role Docker
+      local_action: command ansible-galaxy install -f geerlingguy.docker
+
+    - name: Check if PIP is already installed
+      stat: path=/usr/bin/pip
+      register: pip_exists
+
+    - name: Check if Docker is already installed
+      stat: path=/usr/bin/docker
+      register: docker_exists
+
+    - name: Applying role PIP
+      command: mv ~/.ansible/roles/geerlingguy.pip ~/.ansible/roles/pwslab.pip
+    #   when: not pip_exists.stat.exists
+      ignore_errors: yes
+
+    - name: Applying role Docker
+      command: mv ~/.ansible/roles/geerlingguy.docker ~/.ansible/roles/pwslab.docker
+      when: not docker_exists.stat.exists
+      ignore_errors: yes
+
+    - name: Applying replacement on 20.04 or 8
+      lineinfile:
+          dest: ~/.ansible/roles/pwslab.pip/defaults/main.yml
+          regexp: '^pip_package: '
+          line: 'pip_package: python3-pip'
+          state: present
+      when:
+        - os_check.stdout | regex_search("CentOS Linux 8") or os_check.stdout | regex_search("Ubuntu 20")
+        # - not pip_exists.stat.exists
+
+    - name: Installing PIP
+      include_role:
+        name: pwslab.pip
+    #   when: not pip_exists.stat.exists
+    
+    - name: Installing Docker
+      include_role:
+          name: pwslab.docker
+      when: not docker_exists.stat.exists
+
+    -   name: Install docker-py
+        shell: pip install docker-py
+        when: 
+            - os_check.stdout | regex_search("CentOS Linux 7") or os_check.stdout | regex_search("Ubuntu 18")
+
+
+    -   name: Get the docker image of Memgraph
+        get_url:
+            url: https://download.memgraph.com/memgraph/v{{ memgraph_version }}/docker/memgraph-{{ memgraph_version }}-community-docker.tar.gz
+            dest: /tmp/memgraph-{{ memgraph_version }}-community-docker.tar.gz
+    
+    -   name: Load the image
+        shell: docker load -i /tmp/memgraph-{{ memgraph_version }}-community-docker.tar.gz
+
+    -   name: Create the container
+        docker_container:
+            name: memgraph
+            image: memgraph
+            volumes:
+                - mg_lib:/var/lib/memgraph
+                - mg_log:/var/log/memgraph
+                - mg_etc:/etc/memgraph
+            ports:
+                - "7687:7687"
